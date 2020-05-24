@@ -40,22 +40,22 @@ constexpr double one_point_one_to_nth[] = {
 constexpr double OnePointOneToNth(int n) { return one_point_one_to_nth[n]; }
 
 class State {
- public:
+public:
   enum {
     kNothing = 0,
     // sell boost projects
-    kImprovedAutoclippers = 0x00001,    //  750 op
-    kEvenBetterAutoclippers = 0x00002,  // 2500 op
-    kOptimizedAutoclippers = 0x00004,   // 5000 op
-    kHadwigerClipDiagrams = 0x00008,    // 6000 op
+    kImprovedAutoclippers = 0x00001,   //  750 op
+    kEvenBetterAutoclippers = 0x00002, // 2500 op
+    kOptimizedAutoclippers = 0x00004,  // 5000 op
+    kHadwigerClipDiagrams = 0x00008,   // 6000 op
     // wire supply boost projects
     kImprovedWireExtrusion = 0x00010,    // 1750 op
     kOptimizedWireExtrusion = 0x00020,   // 3500 op
     kMicrolatticeShapecasting = 0x00040, // 7500 op
     // marketing boosts
-    kNewSlogan = 0x00080,                // 2500 ops + 25 banked
-    kCatchyJingle = 0x00100,             // 4500 ops + 45 banked
-    kHypnoHarmonics = 0x00200,           // 7500 ops + 1 trust
+    kNewSlogan = 0x00080,      // 2500 ops + 25 banked
+    kCatchyJingle = 0x00100,   // 4500 ops + 45 banked
+    kHypnoHarmonics = 0x00200, // 7500 ops + 1 trust
     // creativity
     kCreativity = 0x00400,
     // trust
@@ -74,22 +74,39 @@ class State {
   };
 
   State() = default;
-  State(const State&) = default;
-  State(State&&) = default;
-  State& operator=(const State&) = default;
-  State& operator=(State&&) = default;
+  State(const State &) = default;
+  State(State &&) = default;
+  State &operator=(const State &) = default;
+  State &operator=(State &&) = default;
 
   using BranchList = absl::InlinedVector<std::unique_ptr<State>, 4>;
 
   // Return a copy of this state, after the given amount of time passes.
   std::unique_ptr<State> PassTime(double seconds) const;
 
+  enum LimitType {
+    kClipsLimit,
+    kTimeLimit,
+  };
+
   // Return a sequence of possible branch states from here.
-  BranchList Branches(double limit = HUGE_VAL) const;
+  BranchList Branches(LimitType limit_type = kTimeLimit,
+                      double limit_value = HUGE_VAL) const;
 
-  bool IsStrictlyWorseThan(const State& other) const;
+  bool AtGoal(LimitType limit_type, double limit_value) const {
+    switch (limit_type) {
+    case kClipsLimit:
+      return clips_ >= limit_value;
+    case kTimeLimit:
+      return time_ >= limit_value;
+    }
+    assert(!"huh?");
+    return false;
+  }
 
-  friend std::ostream& operator<<(std::ostream& o, const State& s);
+  bool IsStrictlyWorseThan(const State &other) const;
+
+  friend std::ostream &operator<<(std::ostream &o, const State &s);
 
   double Time() const { return time_; }
   double Clips() const { return clips_; }
@@ -103,7 +120,7 @@ class State {
   }
   static constexpr double eps = 1e-9;
 
- private:
+private:
   // clips multiplier based on active projects
   double ClipBoost() const {
     static constexpr double s[16] = {1.0,  1.25, 1.5,  1.75, 1.75, 2.0,
@@ -126,14 +143,14 @@ class State {
     return boost * OnePointOneToNth(mlvl_ - 1);
   }
 
- public:
+public:
   // Clips generated per second
   double ClipsPerSecond() const {
     const double repeat_rate = 25.0000007;
     return repeat_rate + ClipBoost() * auto_clippers_;
   }
 
- private:
+private:
   // Dollars earned from sales per second
   double EarningsPerSecond() const {
     double cps = ClipsPerSecond();
@@ -142,7 +159,7 @@ class State {
            MarketBoost();
   }
 
- public:
+public:
   // Net dollars earned per scond
   double DollarsPerSecond() const {
     double base_cost = 20.0;
@@ -154,12 +171,12 @@ class State {
   double DollarsSpent() const {
     double dollars_spent_on_clips = 0.;
     if (auto_clippers_ > 0) {
-      dollars_spent_on_clips =
-          auto_clippers_ * 5. - 1. + (1 - std::pow(1.1, auto_clippers_)) / (-.1);
+      dollars_spent_on_clips = auto_clippers_ * 5. - 1. +
+                               (1 - std::pow(1.1, auto_clippers_)) / (-.1);
     }
     double dollars_spent_on_marketing = 100. * std::pow(2., mlvl_ - 1) - 100.;
     return dollars_spent_on_clips + dollars_spent_on_marketing;
-   }
+  }
 
   // Ops per second
   double OpsPerSecond() const {
@@ -183,7 +200,7 @@ class State {
   std::string History() const;
   std::string Detail() const;
 
- private:
+private:
   // Returns true if you meet the criteria to purchase the given project.
   // Does not check if costs can be paid.  Returns false if the project is
   // already purchased.
@@ -193,9 +210,9 @@ class State {
   double NextOpsLimit() const;
 
   // Add all purchases possible for this threshold
-  void AddOpsPurchases(BranchList* br, double ops_thresh,
+  void AddOpsPurchases(BranchList *br, double ops_thresh,
                        double ops_thresh_time) const;
-  void AddCreatPurchase(BranchList* br, double creat_thresh,
+  void AddCreatPurchase(BranchList *br, double creat_thresh,
                         double creat_thresh_time) const;
 
   // Returns the next limit for buying a creativity project.  The attached
@@ -205,7 +222,8 @@ class State {
 
   void AwardProject(uint32_t project);
 
-  BranchList DoBranches(double limit = HUGE_VAL) const;
+  BranchList DoBranches(LimitType limit_type = kTimeLimit,
+                        double limit_value = HUGE_VAL) const;
 
   // Make all spree purchases possible from this state, and append them to
   // the branch list.
@@ -213,7 +231,7 @@ class State {
   // It is assumed that *this is a member of the BranchList.  This is only
   // safe because the list is a container of unique_ptrs, so *this won't
   // be moved if the container grows.
-  void AddSpreePurchases(BranchList* out) const;
+  void AddSpreePurchases(BranchList *out) const;
 
   // Logging functions
   void Log(uint8_t v);
@@ -241,6 +259,6 @@ class State {
   uint8_t history_[kHistorySize] = {0};
 };
 
-}  // namespace clips
+} // namespace clips
 
-#endif  // CLIPS_CLIPS_H_
+#endif // CLIPS_CLIPS_H_

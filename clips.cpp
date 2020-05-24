@@ -11,7 +11,7 @@ namespace clips {
 // Don't set above 7 without expanding lookup tables in the header.
 constexpr int max_procs = 6;
 
-bool State::IsStrictlyWorseThan(const State& other) const {
+bool State::IsStrictlyWorseThan(const State &other) const {
   if ((projects_ & kWin) && !(other.projects_ & kWin)) {
     return false;
   }
@@ -68,7 +68,7 @@ bool State::MeetsPrereqs(uint32_t project) const {
 double State::NextOpsLimit() const {
   const double ops_limit = 1000. * memory_;
   if (ops_ == ops_limit || clips_ < 2000.) {
-    return HUGE_VAL;  // We aren't earning ops, nothing to save for
+    return HUGE_VAL; // We aren't earning ops, nothing to save for
   } else if (ops_ < 750. && MeetsPrereqs(kImprovedAutoclippers)) {
     return 750.;
   } else if (ops_ < 1000. && (memory_ == 1 || MeetsPrereqs(kCreativity))) {
@@ -172,12 +172,12 @@ constexpr OpsProject kOpsProjects[kNumOpsProjects] = {
     {750., State::kImprovedAutoclippers, State::kNothing},
 };
 
-}  // namespace
+} // namespace
 
 // Potentially purchase things when we reach a threshold.
-void State::AddOpsPurchases(BranchList* br, double ops_thresh,
+void State::AddOpsPurchases(BranchList *br, double ops_thresh,
                             double ops_thresh_time) const {
-  for (const auto& item : kOpsProjects) {
+  for (const auto &item : kOpsProjects) {
     if (ops_thresh == item.cost && MeetsPrereqs(item.project)) {
       br->push_back(PassTime(ops_thresh_time));
       br->back()->ops_ = 0.;
@@ -186,7 +186,7 @@ void State::AddOpsPurchases(BranchList* br, double ops_thresh,
   }
 }
 
-void State::AddCreatPurchase(BranchList* br, double creat_thresh,
+void State::AddCreatPurchase(BranchList *br, double creat_thresh,
                              double creat_thresh_time) const {
   struct Purchase {
     double cost;
@@ -203,7 +203,7 @@ void State::AddCreatPurchase(BranchList* br, double creat_thresh,
       {200., kTothSausageConjecture, true},
       {250., kDonkeySpace, true},
   };
-  for (const auto& item : creat_project_list) {
+  for (const auto &item : creat_project_list) {
     if (creat_thresh == item.cost && MeetsPrereqs(item.project)) {
       br->push_back(PassTime(creat_thresh_time));
       br->back()->creat_ = 0.;
@@ -219,7 +219,8 @@ void State::AddCreatPurchase(BranchList* br, double creat_thresh,
 }
 
 // Return a sequence of possible branch states from here.
-State::BranchList State::DoBranches(double limit) const {
+State::BranchList State::DoBranches(LimitType limit_type,
+                                    double limit_value) const {
   State::BranchList ret;
 
   // Abandon this branch if we are losing money, are capped on creat, are
@@ -258,8 +259,8 @@ State::BranchList State::DoBranches(double limit) const {
   double clips_thresh =
       *std::upper_bound(clips_limits, clips_limits + 11, clips_);
   bool halt = false;
-  if (clips_thresh > limit) {
-    clips_thresh = limit;
+  if (limit_type == kClipsLimit && clips_thresh > limit_value) {
+    clips_thresh = limit_value;
     halt = true;
   }
   double clips_thresh_time = (clips_thresh - clips_) / ClipsPerSecond();
@@ -285,6 +286,18 @@ State::BranchList State::DoBranches(double limit) const {
   }
 
   // Figure out what our next decision point will be
+  // Time limit hit before next decision point?
+  if (limit_type == kTimeLimit) {
+    double limit_thresh_time = limit_value - time_;
+    if (limit_thresh_time < dollars_thresh_time &&
+        limit_thresh_time < clips_thresh_time &&
+        limit_thresh_time < ops_thresh_time &&
+        limit_thresh_time < creat_thresh_time) {
+      ret.push_back(PassTime(limit_thresh_time));
+      ret.back()->time_ = limit_value;
+      return ret;
+    }
+  }
   // Dollars decision point?
   if (dollars_thresh_time < clips_thresh_time &&
       dollars_thresh_time < ops_thresh_time &&
@@ -420,10 +433,11 @@ State::BranchList State::DoBranches(double limit) const {
   std::cerr << *this << "\n";
   assert(!"No choice was best?");
   __builtin_trap();
-}
+} // namespace clips
 
-State::BranchList State::Branches(double limit) const {
-  State::BranchList br = DoBranches(limit);
+State::BranchList State::Branches(LimitType limit_type,
+                                  double limit_value) const {
+  State::BranchList br = DoBranches(limit_type, limit_value);
   for (size_t i = 0; i < br.size(); ++i) {
     if (br[i]->spree_ != kNothing) {
       br[i]->AddSpreePurchases(&br);
@@ -433,47 +447,47 @@ State::BranchList State::Branches(double limit) const {
   return br;
 }
 
-void State::AddSpreePurchases(BranchList* out) const {
+void State::AddSpreePurchases(BranchList *out) const {
   int hypno_harmonics = (projects_ & kHypnoHarmonics) ? 1 : 0;
   bool at_thresh = false;
   switch (spree_) {
-    case kSpreeProcessor:
-      // Buy a processor?
-      if (trust_ > memory_ + processors_ + hypno_harmonics &&
-          processors_ < max_procs) {
+  case kSpreeProcessor:
+    // Buy a processor?
+    if (trust_ > memory_ + processors_ + hypno_harmonics &&
+        processors_ < max_procs) {
+      out->push_back(absl::make_unique<State>(*this));
+      out->back()->processors_ += 1;
+      out->back()->LogProcessor();
+      out->back()->spree_ = kSpreeMemory;
+    }
+    ABSL_FALLTHROUGH_INTENDED;
+  case kSpreeMemory:
+    // Buy memory (to stop collecting creat?)
+    if (trust_ > memory_ + processors_ + hypno_harmonics) {
+      out->push_back(absl::make_unique<State>(*this));
+      out->back()->memory_ += 1;
+      out->back()->LogMemory();
+      out->back()->spree_ = kHypnoHarmonics;
+    }
+    at_thresh = true;
+    ABSL_FALLTHROUGH_INTENDED;
+  default:
+    for (int i = 0; i < kNumOpsProjects; ++i) {
+      const auto &item = kOpsProjects[i];
+      // don't buy items we considered in a previous pass
+      if (item.project == spree_) {
+        at_thresh = true;
+      }
+      if (!at_thresh) {
+        continue;
+      }
+      if (ops_ >= item.cost && MeetsPrereqs(item.project)) {
         out->push_back(absl::make_unique<State>(*this));
-        out->back()->processors_ += 1;
-        out->back()->LogProcessor();
-        out->back()->spree_ = kSpreeMemory;
+        out->back()->AwardProject(item.project);
+        out->back()->ops_ -= item.cost;
+        out->back()->spree_ = item.next_project;
       }
-      ABSL_FALLTHROUGH_INTENDED;
-    case kSpreeMemory:
-      // Buy memory (to stop collecting creat?)
-      if (trust_ > memory_ + processors_ + hypno_harmonics) {
-        out->push_back(absl::make_unique<State>(*this));
-        out->back()->memory_ += 1;
-        out->back()->LogMemory();
-        out->back()->spree_ = kHypnoHarmonics;
-      }
-      at_thresh = true;
-      ABSL_FALLTHROUGH_INTENDED;
-    default:
-      for (int i = 0; i < kNumOpsProjects; ++i) {
-        const auto& item = kOpsProjects[i];
-        // don't buy items we considered in a previous pass
-        if (item.project == spree_) {
-          at_thresh = true;
-        }
-        if (!at_thresh) {
-          continue;
-        }
-        if (ops_ >= item.cost && MeetsPrereqs(item.project)) {
-          out->push_back(absl::make_unique<State>(*this));
-          out->back()->AwardProject(item.project);
-          out->back()->ops_ -= item.cost;
-          out->back()->spree_ = item.next_project;
-        }
-      }
+    }
   }
 }
 
@@ -521,7 +535,7 @@ void State::LogMemory() { Log(129); }
 // purchases use log IDs 130 through 148 inclusive
 void State::LogPurchase(uint8_t id) { Log(130 + id); }
 
-std::ostream& operator<<(std::ostream& o, const State& s) {
+std::ostream &operator<<(std::ostream &o, const State &s) {
   int minutes = floor(s.time_ / 60);
   double seconds = s.time_ - 60. * minutes;
   int hypno_harmonics = (s.projects_ & s.kHypnoHarmonics) ? 1 : 0;
@@ -549,16 +563,19 @@ std::ostream& operator<<(std::ostream& o, const State& s) {
 }
 
 std::string State::Detail() const {
-  return absl::StrFormat("%10e %10e %10e %10e %10e\n", time_, ops_, creat_,
-                         clips_, dollars_);
+  return absl::StrFormat("     t=%f o=%f cr=%f cl=%f $=%f\n"
+                         "     o/t=%f cr/t=%f cl/t=%f $/t=%f\n",
+                         time_, ops_, creat_, clips_, dollars_,
+                         OpsPerSecond() / 100., CreatPerSecond() / 100.,
+                         ClipsPerSecond() / 100., DollarsPerSecond() / 100.);
 }
 
 std::string State::History() const {
   std::vector<int> h;
   for (int i = 0; i < history_idx_; ++i) {
     h.push_back(history_[i]);
-    return absl::StrJoin(h, " ");
   }
+  return absl::StrJoin(h, " ");
 }
 
-}  // namespace clips
+} // namespace clips
